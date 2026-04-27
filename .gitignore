@@ -2,4 +2,8 @@
 __pycache__/
 *.pyc
 edge_history.json
+# Pickles are ignored by default, but we KEEP the pune_real OSM cache so Render
+# (and other deploy targets) don't have to import osmnx + download from OSM on
+# cold start. That import + download peaks well over the free-tier 512 MB cap.
 *.pkl
+!pune_real_*.pkl

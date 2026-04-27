@@ -94,19 +94,34 @@ SCENARIOS_BY_CITY = {
 
 
 # =============================================================================
-# PUNE (REAL GRAPH) — load OSM, translate events, resolve fleet to OSM nodes
+# PUNE (REAL GRAPH) — lazy-loaded on first request that needs it.
+#
+# Render's free tier caps at 512 MB. Module-level loading (unpickle 43k-node
+# graph + translate 8 events × A* + resolve fleet) peaks well above that on
+# cold start. Deferring to first request keeps the boot footprint small and
+# the spike happens after the worker is healthy.
 # =============================================================================
 
-print("Loading Pune (Real) OSM graph...")
-PUNE_REAL = get_pune_real()
-PUNE_REAL.events = translate_handbuilt_events(get_city('pune'), PUNE_REAL)
-print(f"  Translated {len(PUNE_REAL.events)} calendar events to "
-      f"{sum(len(e.affected_edges) for e in PUNE_REAL.events)} OSM corridor edges.")
+PUNE_REAL = None
+RESOLVED_FLEET = None
+_PUNE_REAL_LOADED = False
 
-# Resolve the demo fleet's hand-built endpoints to OSM nodes once at startup.
-# Saves doing 24 snap calls per fleet simulation request.
-RESOLVED_FLEET = resolve_fleet_for(PUNE_REAL, get_city('pune'), DEMO_FLEET)
-print(f"  Resolved {len(RESOLVED_FLEET)} fleet shipments onto pune_real graph.\n")
+
+def _ensure_pune_real():
+    """Idempotent. Loads cached OSM graph, translates calendar events onto
+    OSM corridors, and resolves the demo fleet's hand-built endpoints to
+    OSM node IDs. Heavy on the first call (~3-5s), no-op after."""
+    global PUNE_REAL, RESOLVED_FLEET, _PUNE_REAL_LOADED
+    if _PUNE_REAL_LOADED:
+        return
+    print("Loading Pune (Real) OSM graph (lazy)...")
+    PUNE_REAL = get_pune_real()
+    PUNE_REAL.events = translate_handbuilt_events(get_city('pune'), PUNE_REAL)
+    print(f"  Translated {len(PUNE_REAL.events)} calendar events to "
+          f"{sum(len(e.affected_edges) for e in PUNE_REAL.events)} OSM corridor edges.")
+    RESOLVED_FLEET = resolve_fleet_for(PUNE_REAL, get_city('pune'), DEMO_FLEET)
+    print(f"  Resolved {len(RESOLVED_FLEET)} fleet shipments onto pune_real graph.\n")
+    _PUNE_REAL_LOADED = True
 
 
 # =============================================================================
@@ -551,6 +566,8 @@ def api_manual_route():
     """
     data = request.get_json() or {}
     city_key = data.get('city', 'pune_real')
+    if city_key == 'pune_real':
+        _ensure_pune_real()
     try:
         city = get_city(city_key)
     except KeyError:
@@ -829,8 +846,12 @@ def _fleet_rain_intensity(city_key):
 
 def _fleet_for_city(city_key: str):
     """Pick the right fleet representation for the given city. On pune_real
-    we hand back the pre-resolved (OSM-node-id) fleet built at startup."""
-    return RESOLVED_FLEET if city_key == 'pune_real' else DEMO_FLEET
+    we hand back the pre-resolved (OSM-node-id) fleet, lazy-loading the OSM
+    graph on first call so cold-start RAM stays under Render's free tier cap."""
+    if city_key == 'pune_real':
+        _ensure_pune_real()
+        return RESOLVED_FLEET
+    return DEMO_FLEET
 
 
 # =============================================================================
@@ -856,6 +877,8 @@ def api_geocode():
     data = request.get_json() or {}
     q = (data.get('query') or '').strip()
     city_key = data.get('city', 'pune_real')
+    if city_key == 'pune_real':
+        _ensure_pune_real()
 
     if not q:
         return jsonify({'error': 'Empty query'}), 400
