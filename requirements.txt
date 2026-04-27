@@ -1,0 +1,6 @@
+flask
+requests
+osmnx
+networkx
+google-generativeai
+python-dotenv
