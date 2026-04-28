@@ -23,9 +23,17 @@ import os
 
 from flask import Flask, jsonify, request, render_template_string
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
+
+# India Standard Time. Render runs containers in UTC; without this, peak-hour
+# detection would always land in the wrong bucket for any judge in India and
+# the demo would underrepresent rush-hour conditions. All callers should use
+# now_local() instead of datetime.now().
+IST = timezone(timedelta(hours=5, minutes=30))
+def now_local() -> datetime:
+    return datetime.now(IST).replace(tzinfo=None)
 
 import google.generativeai as genai
 
@@ -581,7 +589,7 @@ def api_manual_route():
         return jsonify({'error': 'Start and end must differ'}), 400
 
     # ----- a) Date ---------------------------------------------------------
-    now = datetime.now()
+    now = now_local()
     date_override_raw = data.get('date_override')
     if date_override_raw:
         try:
@@ -754,14 +762,15 @@ def api_manual_route():
         {'name': e['name'], 'severity': e['severity']}
         for e in cal_events_payload
     ]
+    # Prefer the user's typed query (e.g. "Swargate") over the graph node name
+    # — the user knows what they meant by it, and OSM intersection names are
+    # almost always blank or a road name they didn't type.
     start_query = (data.get('start_query') or '').strip()
     end_query = (data.get('end_query') or '').strip()
-    origin_label = (city.nodes[start].name.strip()
-                    if city.nodes[start].name and city.nodes[start].name.strip()
-                    else (start_query or f"intersection {start}"))
-    dest_label = (city.nodes[end].name.strip()
-                  if city.nodes[end].name and city.nodes[end].name.strip()
-                  else (end_query or f"intersection {end}"))
+    _node_start_name = (city.nodes[start].name or '').strip()
+    _node_end_name = (city.nodes[end].name or '').strip()
+    origin_label = start_query or _node_start_name or f"intersection {start}"
+    dest_label = end_query or _node_end_name or f"intersection {end}"
     print(f"  -> Calling Gemini for narrative: {origin_label} -> {dest_label} "
           f"(model_loaded={GEMINI_MODEL is not None})")
     narrative_text, narrative_source = generate_narrative_with_gemini(
@@ -826,7 +835,7 @@ def _resolve_fleet_date(date_override_raw):
             return datetime.strptime(date_override_raw, "%Y-%m-%d").date()
         except ValueError:
             return None    # caller treats None as bad input
-    return datetime.now().date()
+    return now_local().date()
 
 
 def _fleet_rain_intensity(city_key):
@@ -2191,25 +2200,25 @@ section { padding: 5rem 0; position: relative; }
   <div class="container">
     <div class="section-eyebrow-row"><span class="bar"></span><span class="eyebrow">Manual Mode</span></div>
     <h2 class="h-section" style="color: #fff; margin-bottom: 0.85rem;">Type it. <span class="stroke-text-yel">Trust it.</span></h2>
-    <p style="color: var(--sage); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.82rem; margin-bottom: 2.25rem;">Pick two points · System derives every condition · Read every assumption</p>
+    <p style="color: var(--sage); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.82rem; margin-bottom: 2.25rem;">Pick two points · See the system anticipate · Each condition shown with its source</p>
     <div class="manual-console">
       <div class="manual-grid">
         <div>
           <div class="demo-step-label">01 / Type Start</div>
-          <input id="m-start" class="brut-input" type="text" value="Swargate" placeholder="e.g. Swargate" autocomplete="off"/>
+          <input id="m-start" class="brut-input" type="text" value="Hinjewadi" placeholder="e.g. Hinjewadi" autocomplete="off"/>
         </div>
         <div>
           <div class="demo-step-label">02 / Type End</div>
-          <input id="m-end" class="brut-input" type="text" value="Hinjewadi" placeholder="e.g. Hinjewadi" autocomplete="off"/>
+          <input id="m-end" class="brut-input" type="text" value="Viman Nagar" placeholder="e.g. Viman Nagar" autocomplete="off"/>
         </div>
       </div>
       <div style="margin-bottom: 1.5rem;">
         <div class="demo-step-label">03 / Date (optional)</div>
         <select id="m-date" class="brut-select" style="max-width: 28rem;">
-          <option value="">Today</option>
-          <option value="2026-05-02">IPL match day · May 2, 2026</option>
+          <option value="2026-05-02" selected>IPL match day · May 2, 2026</option>
           <option value="2026-09-18">Ganpati Visarjan · Sep 18, 2026</option>
           <option value="2026-12-06">Pune Marathon · Dec 6, 2026</option>
+          <option value="">Today</option>
         </select>
       </div>
       <button id="manual-btn" class="btn-push">⚡ Compute Route</button>
@@ -2489,6 +2498,8 @@ section { padding: 5rem 0; position: relative; }
           city: "pune_real",
           start_node: gs.nearest_node,
           end_node: ge.nearest_node,
+          start_query: startQ,
+          end_query: endQ,
           date_override: dateOverride,
         }),
       }).then(r => r.json());
@@ -2869,7 +2880,7 @@ section { padding: 5rem 0; position: relative; }
     const lons = allCoords.map(c => c[1]);
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-    const W = 800, H = 400, PAD_X = 140, PAD_Y = 60;
+    const W = 800, H = 400, PAD_X = 90, PAD_Y = 80;
     const project = ([lat, lon]) => {
       const x = (lon - minLon) / (maxLon - minLon || 1) * (W - 2*PAD_X) + PAD_X;
       const y = H - ((lat - minLat) / (maxLat - minLat || 1) * (H - 2*PAD_Y) + PAD_Y);
@@ -2879,30 +2890,59 @@ section { padding: 5rem 0; position: relative; }
     for (let i = 0; i <= 16; i++) { const x = (W/16)*i; grid += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#000" stroke-opacity="0.06" stroke-width="1"/>`; }
     for (let i = 0; i <= 8; i++) { const y = (H/8)*i; grid += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#000" stroke-opacity="0.06" stroke-width="1"/>`; }
     svg.innerHTML += grid;
+
+    // Baseline route — thin dashed gray. Smart route — thicker solid yellow on
+    // top so the diff is visually obvious in 1s. Order matters; smart on top.
     const basePts = d.baseline.coords.map(project);
-    svg.innerHTML += `<path d="${basePts.map((p,i)=>(i?'L ':'M ')+p[0]+','+p[1]).join(' ')}" fill="none" stroke="#171e19" stroke-width="3" stroke-dasharray="8 6" opacity="0.5"/>`;
+    svg.innerHTML += `<path d="${basePts.map((p,i)=>(i?'L ':'M ')+p[0]+','+p[1]).join(' ')}" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-dasharray="6 4"/>`;
     const smartPts = d.smart.coords.map(project);
-    svg.innerHTML += `<path d="${smartPts.map((p,i)=>(i?'L ':'M ')+p[0]+','+p[1]).join(' ')}" fill="none" stroke="#000" stroke-width="4"/>`;
+    svg.innerHTML += `<path d="${smartPts.map((p,i)=>(i?'L ':'M ')+p[0]+','+p[1]).join(' ')}" fill="none" stroke="#facc15" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+    // Dedup intersections that appear on both paths.
     const seen = new Set();
     const allPts = [];
     d.baseline.coords.forEach((c, i) => { const k = c.join(","); if(!seen.has(k)){seen.add(k);allPts.push({coord:c,name:d.baseline.path_names[i]});}});
     d.smart.coords.forEach((c, i) => { const k = c.join(","); if(!seen.has(k)){seen.add(k);allPts.push({coord:c,name:d.smart.path_names[i]});}});
-    const endName = d.smart.path_names[d.smart.path_names.length - 1];
-    allPts.forEach((pt, idx) => {
+
+    // We need to identify the start/end visually no matter how many
+    // intermediate OSM-intersection nodes are in between. Use first-baseline
+    // coord as start, last-smart coord as end.
+    const startKey = d.baseline.coords[0].join(",");
+    const endKey   = d.smart.coords[d.smart.coords.length - 1].join(",");
+    const startName = d.baseline.path_names[0];
+    const endName   = d.smart.path_names[d.smart.path_names.length - 1];
+
+    // Intermediate nodes: tiny faded dots, no labels. Hundreds of OSM
+    // intersections were drowning the route in a black blob before.
+    allPts.forEach(pt => {
+      const k = pt.coord.join(",");
+      const isStart = k === startKey;
+      const isEnd   = k === endKey;
+      if (isStart || isEnd) return;
       const [x, y] = project(pt.coord);
-      const isStart = idx === 0;
-      const isEnd = pt.name === endName;
-      const r = (isStart || isEnd) ? 10 : 6;
-      const fill = isStart ? "#ffe17c" : isEnd ? "#000" : "#fff";
-      svg.innerHTML += `<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="#000" stroke-width="2.5"/>` +
-                       `<text x="${x}" y="${y - 16}" text-anchor="middle" font-family="Cabinet Grotesk, sans-serif" font-weight="800" font-size="11" fill="#000">${pt.name.toUpperCase()}</text>`;
+      svg.innerHTML += `<circle cx="${x}" cy="${y}" r="1.5" fill="#000" stroke="none" opacity="0.3"/>`;
     });
-    svg.innerHTML += `<g transform="translate(20, 20)">
-      <rect x="-5" y="-5" width="170" height="55" fill="#fff" stroke="#000" stroke-width="2" rx="6"/>
-      <line x1="6" y1="12" x2="36" y2="12" stroke="#171e19" stroke-width="3" stroke-dasharray="8 6" opacity="0.5"/>
-      <text x="44" y="16" font-family="Satoshi, sans-serif" font-size="10" font-weight="700" fill="#000">BASELINE</text>
-      <line x1="6" y1="34" x2="36" y2="34" stroke="#000" stroke-width="4"/>
-      <text x="44" y="38" font-family="Satoshi, sans-serif" font-size="10" font-weight="700" fill="#000">SMART ROUTE</text>
+
+    // Start + end markers, drawn last so they're on top.
+    [[startKey, startName, "#ffe17c", true], [endKey, endName, "#000", false]].forEach(([k, name, fill, isStart]) => {
+      const coord = allPts.find(p => p.coord.join(",") === k)?.coord;
+      if (!coord) return;
+      const [x, y] = project(coord);
+      svg.innerHTML += `<circle cx="${x}" cy="${y}" r="8" fill="${fill}" stroke="#000" stroke-width="2.5"/>`;
+      // Label only renders if the path_names slot has a real name (handbuilt
+      // graph). On OSM the path_names are mostly empty strings — skip silently.
+      const label = (name || (isStart ? 'START' : 'END')).toUpperCase();
+      svg.innerHTML += `<text x="${x}" y="${y - 16}" text-anchor="middle" font-family="Cabinet Grotesk, sans-serif" font-weight="800" font-size="11" fill="#000">${label}</text>`;
+    });
+
+    // Legend, anchored to the bottom-left INSIDE the SVG so it doesn't sit on
+    // the route. translate(x, y) is the top-left corner of the legend.
+    svg.innerHTML += `<g transform="translate(16, ${H - 60})">
+      <rect x="-6" y="-6" width="180" height="56" fill="#fff" stroke="#000" stroke-width="2" rx="6"/>
+      <line x1="6" y1="10" x2="38" y2="10" stroke="rgba(0,0,0,0.55)" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="46" y="14" font-family="Satoshi, sans-serif" font-size="10" font-weight="700" fill="#000">BASELINE</text>
+      <line x1="6" y1="32" x2="38" y2="32" stroke="#facc15" stroke-width="3.5" stroke-linecap="round"/>
+      <text x="46" y="36" font-family="Satoshi, sans-serif" font-size="10" font-weight="700" fill="#000">SMART ROUTE</text>
     </g>`;
   }
 </script>

@@ -310,13 +310,19 @@ def get_active_events(city: CityConfig, query_date: date) -> List[CalendarEvent]
 
 
 def get_disrupted_edges(city: CityConfig, query_date: date) -> dict:
-    """edge_pair -> (severity, event_name) for the worst event affecting each edge."""
+    """edge_pair -> (severity, event_name) for the worst event affecting each edge.
+
+    Events are applied bidirectionally — a real road closure or major event
+    affects both directions of travel on the listed edges, so we mirror each
+    (a, b) onto (b, a). Without this, manual-mode routes that approach an
+    affected node from the opposite direction would silently bypass the event."""
     disrupted = {}
     for event in get_active_events(city, query_date):
-        for edge_pair in event.affected_edges:
-            existing_sev = disrupted.get(edge_pair, (0.0, ""))[0]
-            if event.severity > existing_sev:
-                disrupted[edge_pair] = (event.severity, event.name)
+        for a, b in event.affected_edges:
+            for ep in ((a, b), (b, a)):
+                existing_sev = disrupted.get(ep, (0.0, ""))[0]
+                if event.severity > existing_sev:
+                    disrupted[ep] = (event.severity, event.name)
     return disrupted
 
 

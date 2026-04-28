@@ -1,9 +1,4 @@
-# JUDGE Q&A CHEAT SHEET v3 — Multi-City
 
-The questions judges WILL ask, with answers that win.
-Memorize the **bold** parts.
-
----
 
 ## Q1. "How is this different from Google Maps?"
 
@@ -12,7 +7,6 @@ Memorize the **bold** parts.
 > Two — we learn from each fleet's specific trips. Three — we optimize
 > for fleet dispatch, not single-driver navigation."**
 
-The IPL day demo is your concrete proof. Use it.
 
 ---
 
@@ -37,11 +31,7 @@ This answer is gold. It turns "limitation" into "discipline."
 
 ## Q4. "Show me a city actually working."
 
-Run `python multicity_router.py`. Three things to point at:
-- Multi-city comparison table (proves consistent results)
-- Pune IPL day demo (calendar layer)
-- Mumbai Eastern Express demo (real-time layer)
-- Bangalore tech rush demo (learning layer)
+
 
 > **"Three different cities. Three different disruption types. One
 > system handles all of them."**
@@ -103,9 +93,7 @@ This makes you sound smarter than the buzzword crowd.
 > Mumbai system saves 30 minutes when the disruption hits the actual
 > baseline path."**
 
-This is a subtle question and answering it well shows depth.
 
----
 
 ## Q11. "Multiple vehicles? Multiple stops?"
 
@@ -186,13 +174,3 @@ This shows you understand your own results.
 
 ---
 
-# THE GOLDEN RULE
-
-**Confidence > completeness.** A confident "we have three cities
-validated, three more on the roadmap" beats a nervous "we don't have
-Delhi yet."
-
-You're selling: **principled architecture, validated execution, and a
-credible scaling story across India.**
-
-Judges fund people who know what they built — and what they didn't.
